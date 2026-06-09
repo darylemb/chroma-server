@@ -1,5 +1,5 @@
-# Sample ServiceMonitor for Prometheus Operator (kube-prometheus-stack).
-# Apply only if you have the operator installed.
+# Optional: ServiceMonitor for Prometheus Operator (kube-prometheus-stack).
+# Remove if you don't use the operator.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

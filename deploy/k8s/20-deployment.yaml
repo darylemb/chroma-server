@@ -7,6 +7,8 @@ metadata:
     app: chroma-server
 spec:
   replicas: 1
+  strategy:
+    type: Recreate   # single replica, avoids races on the embedded DB
   selector:
     matchLabels:
       app: chroma-server
@@ -15,7 +17,6 @@ spec:
       labels:
         app: chroma-server
       annotations:
-        # scrape every 15s
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
@@ -25,9 +26,41 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      initContainers:
+        - name: install-deps
+          image: python:3.11-alpine
+          # Install pip deps into a shared emptyDir so the main container
+          # doesn't need to re-install on every restart. ~80-120s first time,
+          # ~3s on subsequent restarts thanks to the emptyDir cache (mounted
+          # to /venv across restarts of the same pod; the emptyDir is wiped
+          # on pod recreation, so this only helps within a pod's lifetime —
+          # but that's the slow case anyway). For real caching across pods
+          # use a PVC-backed /venv.
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              apk add --no-cache gcc musl-dev linux-headers
+              python -m venv /app/venv
+              . /app/venv/bin/activate
+              pip install --no-cache-dir -U pip wheel
+              pip install --no-cache-dir -r /src/requirements.txt
+              echo "deps installed"
+          volumeMounts:
+            - name: src
+              mountPath: /src
+            - name: app-venv
+              mountPath: /app
       containers:
         - name: chroma
-          image: ghcr.io/darylemb/chroma-server:latest  # build & push with server/Dockerfile
+          image: python:3.11-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              cp /src/server.py /app/server.py
+              . /app/venv/bin/activate
+              exec python /app/server.py
           ports:
             - name: http
               containerPort: 8000
@@ -41,6 +74,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: app-venv
+              mountPath: /app
           resources:
             requests:
               cpu: 100m
@@ -51,15 +86,24 @@ spec:
             httpGet:
               path: /api/v1/heartbeat
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30    # init container takes ~2 min first time
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /api/v1/heartbeat
               port: http
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: chroma-data
+        - name: src
+          configMap:
+            name: chroma-server-source
+        - name: app-venv
+          emptyDir:
+            sizeLimit: 1Gi
