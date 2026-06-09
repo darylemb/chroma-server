@@ -39,6 +39,13 @@ spec:
               value: "0.0.0.0"
             - name: HTTP_PORT
               value: "8000"
+            # chromadb downloads the ONNX embedding model to $HOME/.cache
+            # by default. As UID 1000, $HOME defaults to "/" and we can't
+            # write there. Redirect to a writable path inside the data PVC.
+            - name: HOME
+              value: /data
+            - name: XDG_CACHE_HOME
+              value: /data/.cache
           volumeMounts:
             - name: data
               mountPath: /data
