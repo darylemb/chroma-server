@@ -22,19 +22,16 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       securityContext:
-        runAsNonRoot: true
+        # Init container needs to be root to apk add. Pod-level non-root
+        # would conflict with that, so we drop it here and let the main
+        # container's securityContext set the non-root user.
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
       initContainers:
         - name: install-deps
           image: python:3.11-alpine
-          # apk add / pip install need root; the pod-level runAsNonRoot
-          # applies to init containers too, so we override here.
-          securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-            allowPrivilegeEscalation: true
+
           # Install pip deps into a shared emptyDir so the main container
           # doesn't need to re-install on every restart. ~80-120s first time,
           # ~3s on subsequent restarts thanks to the emptyDir cache (mounted
@@ -60,6 +57,9 @@ spec:
       containers:
         - name: chroma
           image: python:3.11-alpine
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
           command: ["sh", "-c"]
           args:
             - |
