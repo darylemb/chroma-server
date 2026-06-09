@@ -1,0 +1,21 @@
+[Unit]
+Description=ChromaDB HTTP Server (FastAPI + PersistentClient)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+WorkingDirectory=/opt/chroma/server
+Environment="CHROMA_PATH=/opt/chroma/data"
+Environment="HTTP_HOST=127.0.0.1"
+Environment="HTTP_PORT=8000"
+ExecStart=/opt/chroma/venv/bin/python /opt/chroma/server/server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

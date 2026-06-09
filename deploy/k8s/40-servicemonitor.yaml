@@ -1,0 +1,17 @@
+# Sample ServiceMonitor for Prometheus Operator (kube-prometheus-stack).
+# Apply only if you have the operator installed.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: chroma-server
+  namespace: chroma
+  labels:
+    app: chroma-server
+spec:
+  selector:
+    matchLabels:
+      app: chroma-server
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

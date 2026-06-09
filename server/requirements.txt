@@ -1,0 +1,8 @@
+# Pinned to versions known to work on Linux/aarch64 (Oracle Cloud Ampere)
+# Note: pysqlite3-binary has no aarch64 wheel — we use the system sqlite via
+# Python 3.11+ which has sqlite >= 3.35 bundled.
+chromadb>=1.5.0,<2.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0
+prometheus-client>=0.20.0
