@@ -35,7 +35,7 @@ log.info(f"opening PersistentClient at {CHROMA_PATH}")
 client = chromadb.PersistentClient(path=CHROMA_PATH)
 log.info("client ready")
 
-app = FastAPI(title="chroma-server", version="1.0.0")
+app = FastAPI(title="chroma-server", version="1.0.1")
 
 
 @app.middleware("http")
@@ -43,7 +43,6 @@ async def metrics_middleware(request, call_next):
     t0 = time.perf_counter()
     response = await call_next(request)
     dt = time.perf_counter() - t0
-    # Use route pattern, not full path
     route = request.scope.get("route").path if request.scope.get("route") else request.url.path
     REQS.labels(request.method, route, response.status_code).inc()
     LATENCY.labels(request.method, route).observe(dt)
@@ -87,26 +86,53 @@ def delete_collection(name: str):
 class AddBody(BaseModel):
     ids: list[str]
     documents: list[str] | None = None
+    embeddings: list[list[float]] | None = None
     metadatas: list[dict[str, Any]] | None = None
 
 
 class QueryBody(BaseModel):
-    query_texts: list[str]
+    query_texts: list[str] | None = None
+    query_embeddings: list[list[float]] | None = None
     n_results: int = 5
     where: dict[str, Any] | None = None
 
 
-def _get_col(name: str):
+class GetBody(BaseModel):
+    ids: list[str] | None = None
+    where: dict[str, Any] | None = None
+    limit: int | None = None
+    offset: int | None = None
+    include: list[str] | None = None
+
+
+def _get_col(identifier: str):
+    """Resolve a collection by name OR UUID.
+
+    The /collections endpoint returns both name and id; clients may use either
+    as the path param. Look up by id first, then fall back to name.
+    """
+    # Try as UUID first
+    for c in client.list_collections():
+        if str(c.id) == identifier:
+            return client.get_collection(c.name)
+    # Fall back to name
     try:
-        return client.get_collection(name)
+        return client.get_collection(identifier)
     except Exception:
-        raise HTTPException(404, f"collection {name!r} not found")
+        raise HTTPException(404, f"collection {identifier!r} not found")
 
 
 @app.post("/api/v1/collections/{name}/add")
 def add(name: str, body: AddBody):
     col = _get_col(name)
-    col.add(ids=body.ids, documents=body.documents, metadatas=body.metadatas)
+    kwargs = {"ids": body.ids}
+    if body.documents is not None:
+        kwargs["documents"] = body.documents
+    if body.embeddings is not None:
+        kwargs["embeddings"] = body.embeddings
+    if body.metadatas is not None:
+        kwargs["metadatas"] = body.metadatas
+    col.add(**kwargs)
     DOCS_ADDED.inc(len(body.ids))
     return {"ok": True, "added": len(body.ids)}
 
@@ -115,8 +141,40 @@ def add(name: str, body: AddBody):
 def query(name: str, body: QueryBody):
     col = _get_col(name)
     QUERIES.inc()
-    res = col.query(query_texts=body.query_texts, n_results=body.n_results, where=body.where)
+    kwargs = {"n_results": body.n_results}
+    if body.query_texts is not None:
+        kwargs["query_texts"] = body.query_texts
+    elif body.query_embeddings is not None:
+        kwargs["query_embeddings"] = body.query_embeddings
+    else:
+        raise HTTPException(400, "must provide query_texts or query_embeddings")
+    if body.where is not None:
+        kwargs["where"] = body.where
+    res = col.query(**kwargs)
     return res
+
+
+@app.post("/api/v1/collections/{name}/get")
+def get(name: str, body: GetBody):
+    col = _get_col(name)
+    kwargs = {}
+    if body.ids is not None:
+        kwargs["ids"] = body.ids
+    if body.where is not None:
+        kwargs["where"] = body.where
+    if body.limit is not None:
+        kwargs["limit"] = body.limit
+    if body.offset is not None:
+        kwargs["offset"] = body.offset
+    if body.include is not None:
+        kwargs["include"] = body.include
+    return col.get(**kwargs)
+
+
+@app.get("/api/v1/collections/{name}/count")
+def count(name: str):
+    col = _get_col(name)
+    return col.count()
 
 
 @app.get("/metrics")
@@ -126,7 +184,7 @@ def metrics():
 
 @app.get("/")
 def root():
-    return {"service": "chroma-server", "version": "1.0.0", "collections": [c.name for c in client.list_collections()]}
+    return {"service": "chroma-server", "version": "1.0.1", "collections": [c.name for c in client.list_collections()]}
 
 
 if __name__ == "__main__":
