@@ -27,7 +27,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: chroma
-          image: chroma-server:1.0.0
+          image: chroma-server:1.0.1
           imagePullPolicy: Never   # local-only image built with buildah
           ports:
             - name: http
